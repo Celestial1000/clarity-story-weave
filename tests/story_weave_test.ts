@@ -67,3 +67,24 @@ Clarinet.test({
     vote.receipts[0].result.expectErr(105); // err-self-vote
   },
 });
+
+Clarinet.test({
+  name: "Can complete story by creator",
+  async fn(chain: Chain, accounts: Map<string, Account>) {
+    const deployer = accounts.get('deployer')!;
+    
+    let setup = chain.mineBlock([
+      Tx.contractCall('story_weave', 'create-story', [
+        types.utf8("Test Story")
+      ], deployer.address)
+    ]);
+    
+    let complete = chain.mineBlock([
+      Tx.contractCall('story_weave', 'complete-story', [
+        types.uint(1)
+      ], deployer.address)
+    ]);
+    
+    complete.receipts[0].result.expectOk();
+  },
+});
