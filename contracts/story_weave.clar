@@ -9,6 +9,8 @@
 (define-constant err-unauthorized (err u103))
 (define-constant err-invalid-content (err u104))
 (define-constant err-self-vote (err u105))
+(define-constant err-story-complete (err u106))
+(define-constant max-contributions-per-story u100)
 
 ;; Data Variables
 (define-data-var next-story-id uint u1)
@@ -23,7 +25,8 @@
     creator: principal,
     active: bool,
     contributions: uint,
-    created-at: uint
+    created-at: uint,
+    is-complete: bool
 })
 
 (define-map contributions uint {
@@ -39,7 +42,20 @@
 
 ;; Helper functions
 (define-private (is-valid-content (content (string-utf8 1000)))
-    (not (is-eq (len content) u0))
+    (and 
+        (not (is-eq (len content) u0))
+        (<= (len content) u1000)
+    )
+)
+
+(define-private (can-contribute (story-id uint))
+    (let ((story (unwrap! (map-get? stories story-id) false)))
+        (and 
+            (get active story)
+            (not (get is-complete story))
+            (< (get contributions story) max-contributions-per-story)
+        )
+    )
 )
 
 ;; Events
@@ -62,7 +78,8 @@
             creator: tx-sender,
             active: true,
             contributions: u0,
-            created-at: block-height
+            created-at: block-height,
+            is-complete: false
         })
         (var-set next-story-id (+ story-id u1))
         (try! (print-story-created story-id tx-sender))
@@ -75,7 +92,7 @@
     (let 
         ((contribution-id (var-get next-contribution-id))
          (story (unwrap! (map-get? stories story-id) err-not-found)))
-        (asserts! (get active story) err-unauthorized)
+        (asserts! (can-contribute story-id) err-unauthorized)
         (asserts! (is-valid-content content) err-invalid-content)
         (map-set contributions contribution-id {
             story-id: story-id,
@@ -85,9 +102,22 @@
             timestamp: block-height
         })
         (map-set story-contributors {story-id: story-id, user: tx-sender} contribution-id)
+        (map-set stories story-id 
+            (merge story {contributions: (+ (get contributions story) u1)}))
         (var-set next-contribution-id (+ contribution-id u1))
         (try! (print-contribution-added contribution-id story-id tx-sender))
         (ok contribution-id)
+    )
+)
+
+;; Complete story
+(define-public (complete-story (story-id uint))
+    (let ((story (unwrap! (map-get? stories story-id) err-not-found)))
+        (asserts! (is-eq (get creator story) tx-sender) err-unauthorized)
+        (asserts! (not (get is-complete story)) err-already-exists)
+        (map-set stories story-id 
+            (merge story {is-complete: true, active: false}))
+        (ok true)
     )
 )
 
@@ -95,7 +125,9 @@
 (define-public (vote-contribution (contribution-id uint))
     (let 
         ((contribution (unwrap! (map-get? contributions contribution-id) err-not-found))
+         (story (unwrap! (map-get? stories (get story-id contribution)) err-not-found))
          (vote-key {contribution-id: contribution-id, voter: tx-sender}))
+        (asserts! (not (get is-complete story)) err-story-complete)
         (asserts! (not (is-eq tx-sender (get author contribution))) err-self-vote)
         (asserts! (is-none (map-get? user-votes vote-key)) err-already-exists)
         (map-set user-votes vote-key true)
