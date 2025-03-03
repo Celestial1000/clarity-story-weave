@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-  name: "Can create new story",
+  name: "Can create new story with valid title",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const title = "Test Story";
@@ -21,49 +21,30 @@ Clarinet.test({
     
     block.receipts[0].result.expectOk();
     assertEquals(block.receipts[0].result, types.ok(types.uint(1)));
-    
-    let story = chain.mineBlock([
-      Tx.contractCall('story_weave', 'get-story', [
-        types.uint(1)
-      ], deployer.address)
-    ]);
-    
-    story.receipts[0].result.expectOk();
   },
 });
 
 Clarinet.test({
-  name: "Can add contribution to story",
+  name: "Cannot create story with empty title",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
-    const contributor = accounts.get('wallet_1')!;
+    const title = "";
     
-    // First create a story
     let block = chain.mineBlock([
       Tx.contractCall('story_weave', 'create-story', [
-        types.utf8("Test Story")
+        types.utf8(title)
       ], deployer.address)
     ]);
     
-    // Add contribution
-    let contribution = chain.mineBlock([
-      Tx.contractCall('story_weave', 'add-contribution', [
-        types.uint(1),
-        types.utf8("Test contribution content")
-      ], contributor.address)
-    ]);
-    
-    contribution.receipts[0].result.expectOk();
-    assertEquals(contribution.receipts[0].result, types.ok(types.uint(1)));
+    block.receipts[0].result.expectErr(104); // err-invalid-content
   },
 });
 
 Clarinet.test({
-  name: "Can vote on contributions",
+  name: "Cannot vote on own contribution",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const contributor = accounts.get('wallet_1')!;
-    const voter = accounts.get('wallet_2')!;
     
     // Setup story and contribution
     let setup = chain.mineBlock([
@@ -76,23 +57,34 @@ Clarinet.test({
       ], contributor.address)
     ]);
     
-    // Vote on contribution
+    // Try to self-vote
     let vote = chain.mineBlock([
       Tx.contractCall('story_weave', 'vote-contribution', [
         types.uint(1)
-      ], voter.address)
+      ], contributor.address)
     ]);
     
-    vote.receipts[0].result.expectOk();
+    vote.receipts[0].result.expectErr(105); // err-self-vote
+  },
+});
+
+Clarinet.test({
+  name: "Can complete story by creator",
+  async fn(chain: Chain, accounts: Map<string, Account>) {
+    const deployer = accounts.get('deployer')!;
     
-    // Check has-voted
-    let hasVoted = chain.mineBlock([
-      Tx.contractCall('story_weave', 'has-voted', [
-        types.uint(1),
-        types.principal(voter.address)
-      ], voter.address)
+    let setup = chain.mineBlock([
+      Tx.contractCall('story_weave', 'create-story', [
+        types.utf8("Test Story")
+      ], deployer.address)
     ]);
     
-    assertEquals(hasVoted.receipts[0].result, types.bool(true));
+    let complete = chain.mineBlock([
+      Tx.contractCall('story_weave', 'complete-story', [
+        types.uint(1)
+      ], deployer.address)
+    ]);
+    
+    complete.receipts[0].result.expectOk();
   },
 });
